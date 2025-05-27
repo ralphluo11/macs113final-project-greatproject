@@ -1,0 +1,19 @@
+[
+  {
+    "Name": "BiasClassification",
+    "ActionOnFailure": "CONTINUE",
+    "Jar": "command-runner.jar",
+    "Args": [
+      "spark-submit",
+      "--deploy-mode",
+      "cluster",
+      "--master",
+      "yarn",
+      "s3://realralph/scripts/classify_batch.py",
+      "--input-path",
+      "s3://realralph/incoming/parquet/",
+      "--output-path",
+      "s3://realralph/classified/parquet/2025-05-27"
+    ]
+  }
+]

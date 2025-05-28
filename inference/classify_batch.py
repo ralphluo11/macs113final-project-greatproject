@@ -26,8 +26,16 @@ def main(input_path: str, output_path: str):
     spark = (
         SparkSession.builder
         .appName("BatchClassify")
+        .config("spark.hadoop.fs.s3a.connection.maximum", "100") 
+        .config("spark.hadoop.fs.s3a.fast.upload", "true")   
+        .config("spark.hadoop.fs.s3a.committer.name", "directory")
+        .config(
+           "spark.hadoop.mapreduce.outputcommitter.factory.scheme.s3a",
+           "org.apache.hadoop.fs.s3a.commit.S3ACommitterFactory"
+        )
         .getOrCreate()
     )
+
 
     # Read all parquet files under the input prefix
     df = spark.read.parquet(input_path).select("ID", "url", "content")

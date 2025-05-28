@@ -20,7 +20,7 @@ By establishing a high-throughput, reproducible method for identifying political
 ## 2. Why Scale Matters
 
 - **Training volume & local bottlenecks**  
-  We train on ~28 000 articles (train), ~7 000 (val), and ~1 300 (test)—≈36 000 total. On a typical 4-core/16 GB laptop, loading & tokenizing takes 30+ minutes, and a 5-fold CV over a 10-point hyperparameter grid easily exceeds 3 hours with frequent OOM errors.
+  Our dataset includes approximately 28,000 articles for training, 7,000 for validation, and 1,300 for testing, for a total of around 36,000 articles. On a typical machine with four CPU cores and 16 GB of RAM, the preprocessing stage, including loading and tokenization, takes more than 30 minutes. Performing five-fold cross-validation across a ten-point hyperparameter grid typically requires over three hours and often results in out-of-memory errors. These limitations underscore the local computational bottlenecks present in our current setup. As we expand to larger datasets in future work, these bottlenecks are likely to become even more evident, highlighting the importance of improved infrastructure and more efficient processing strategies.
 
 - **Researcher-level incoming volume**  
   Major news outlets publish **500–1 000 articles/day** (≈180 000–365 000/year). Studying multi-year framing shifts or responding to breaking events requires processing hundreds of thousands of articles—well beyond single-node runtimes without crashes or long delays.

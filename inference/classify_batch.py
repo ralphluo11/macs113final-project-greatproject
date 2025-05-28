@@ -7,9 +7,10 @@ from pyspark.ml import PipelineModel
 from pyspark.ml.linalg import Vectors
 from pyspark.sql.types import DoubleType, VectorUDT
 
-# -----------------------------------------------------------------------------
-# UDFs for 50/50 averaging and argmax
-# -----------------------------------------------------------------------------
+
+# UDFs for 50/50 averaging and argmax of the two models' probability vectors
+# This is the best perforaming ensemble method based on my experiments 
+
 avg_udf = udf(
     lambda a, b: Vectors.dense([(x + y) / 2 for x, y in zip(a, b)]),
     VectorUDT()
@@ -19,6 +20,7 @@ argmax_udf = udf(
     DoubleType()
 )
 
+# Main function to run the batch classification
 def main(input_path: str, output_path: str):
     logging.info(f"Starting BatchClassify; reading from {input_path}")
     spark = (
@@ -27,16 +29,16 @@ def main(input_path: str, output_path: str):
         .getOrCreate()
     )
 
-    # 1) Read all parquet files under the input prefix
+    # Read all parquet files under the input prefix
     df = spark.read.parquet(input_path).select("ID", "url", "content")
     logging.info(f"Loaded {df.count()} rows")
 
-    # 2) Load your two trained PipelineModels from S3
+    # Load the two trained PipelineModels from S3
     lr = PipelineModel.load("s3://realralph/bias_classifier_pca_tuned")
     rf = PipelineModel.load("s3://realralph/bias_rf_pca100_tuned")
     logging.info("Loaded LR and RF models")
 
-    # 3) Score both models
+    # Score both models on the input data 
     p_lr = lr.transform(df) \
              .select("ID", "url", "probability") \
              .withColumnRenamed("probability", "prob_lr")
@@ -45,7 +47,7 @@ def main(input_path: str, output_path: str):
              .withColumnRenamed("probability", "prob_rf")
     logging.info("Generated probability vectors")
 
-    # 4) Compute the average probability and final prediction
+    # Compute the average probability and final prediction for the input data 
     joined = p_lr.join(p_rf, on=["ID", "url"])
     pred = (
         joined
@@ -53,7 +55,7 @@ def main(input_path: str, output_path: str):
         .withColumn("prediction", argmax_udf("avg_prob"))
     )
 
-    # 5) Map numeric→text label
+    # Map numeric→text label on predictions 
     mapping = {0.0: "Left", 1.0: "Center", 2.0: "Right"}
     map_udf = udf(lambda x: mapping.get(x, "Unknown"))
     result = (
@@ -63,7 +65,7 @@ def main(input_path: str, output_path: str):
     )
     logging.info("Mapped predictions to text labels")
 
-    # 6) Write results out as Parquet
+    # Write results out as Parquet
     logging.info(f"Writing results to {output_path}")
     result.write.mode("overwrite").parquet(output_path)
 

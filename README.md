@@ -20,9 +20,19 @@ By establishing a high-throughput, reproducible method for identifying political
 
 ## 2. Why Scale Matters
 
-- **Data volume**: Our corpus contains **~120,000 full-text articles** from four outlets (NYT, Fox, CNN, WSJ) spanning 2021–2024.  
-- **Iterative modeling**: Hyperparameter sweeps (Logistic Regression & Random Forest), cross-validation, and embedding pipelines all require multiple passes over the data.  
-- **Reproducibility & production**: Automated cluster provisioning, job submission, and teardown ensure consistent results and fault tolerance for future updates.
+- **Training data volume**  
+  We trained on **27,978** articles (train), **6,996** (validation), and **1,300** (test)—about **36 000** labeled articles in total. Even this moderate corpus already benefits from distributed storage and compute to iterate quickly over feature engineering, hyperparameter sweeps, and cross-validation.
+
+- **Researcher-level incoming volume**  
+  Major news outlets collectively publish on the order of **500–1 000 articles per day**, which translates to **≈180 000–365 000 articles per year**. To study framing shifts over multi-year periods or rapidly respond to breaking events, researchers need to process hundreds of thousands of new articles efficiently—far beyond what a single-node setup can handle without long runtimes or frequent failures.
+
+- **Analyst-level incoming volume**  
+  A power user or policy analyst might ingest **50–100 articles per day** for targeted investigations or dashboard updates—roughly **18 000–36 000 articles per year**. While smaller than the full-corpus scenario, this volume still stresses local machines when run daily, and benefits greatly from elastic, fault-tolerant cluster resources.
+
+**Key takeaways:**  
+- **Partitioned Parquet** writes and **pruning** avoid full-table scans.  
+- **EMR dynamic allocation** scales executors up/down to match daily load.  
+- **Coalesced outputs** and optimized **S3A connector** settings ensure reliable, performant reads and writes at scale.
 
 ---
 

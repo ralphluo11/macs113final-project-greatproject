@@ -29,20 +29,23 @@ By establishing a high-throughput, reproducible method for identifying political
   A power user or policy analyst might ingest **50–100 articles/day** (≈18 000–36 000/year) for dashboards or alerts. Even this load overwhelms local machines when run daily and benefits from elastic, fault-tolerant clusters.
 
 ## 3. Repo Structure
+
+```text
 final-project/
-├── README.md
-├── requirements.txt
+├── README.md                 
+├── requirements.txt         
 │
-├── config/
+├── config/                   
 │   └── emr_steps.json
 │
-├── notebooks/
+├── notebooks/                
 │   ├── ingest_data.ipynb
 │   ├── model_training.ipynb
 │   └── setup_emr_cluster.ipynb
 │
-├── inference/
+├── inference/                
 │   └── classify_batch.py
 │
-└── data/
+└── data/                    
     └── data_test.csv
+```

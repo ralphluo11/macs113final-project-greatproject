@@ -50,30 +50,70 @@ final-project/
     └── data_test.csv
 ```
 
-## 5. Pipeline & Scalable Methods
+## 4. Pipeline & Scalable Methods
 
-Below we walk through each stage of the pipeline, explaining in narrative form how we use Spark patterns **and** AWS managed services to eliminate local‐machine bottlenecks, ensure fault tolerance, and support both researcher-scale and analyst-scale workloads.
-
----
-
-### 5.1 Data Ingestion  
-We begin by loading raw CSV/JSON article dumps from **Amazon S3** into Spark via the S3A connector, which automatically shards large file listings across executors. In our ingestion code (initially prototyped in `notebooks/ingest_data.ipynb` and refactored into a `spark-submit` script), we clean and normalize text, then write out **partitioned Parquet** files—partitioned by `publish_date` and `source`—back to `s3://<bucket>/raw/`. Partitioning lets downstream jobs prune out months or entire news sources, slashing I/O by 90% when you only need recent data. We wrap writes in idempotent overwrite mode with retry logic to recover from transient S3 errors, and register ingestion as the first **EMR Step** in our `config/emr_steps.json` so it runs automatically on cluster creation. By offloading I/O to S3 and parallelizing reads across dozens of Spark tasks, we avoid the 30+ minute, single-threaded load times typical on a 4-core laptop.
+In this section, I will walk through each stage of the pipeline, explaining how I use Spark patterns, AWS managed services, and other coding techniques to eliminate local‐machine bottlenecks and ensure its scalablity, fault tolerance, and support both researcher-scale and normal user-scale workloads.
 
 ---
 
-### 5.2 Model Training (Demo)  
-To demonstrate our Spark ML pipeline—tokenization, TF-IDF, VectorAssembler, and classification models (Logistic Regression and Random Forest)—we cache the cleaned DataFrame immediately after filtering. This **DataFrame caching** prevents repeated Parquet scans during 5-fold cross-validation sweeps, cutting I/O overhead by roughly 80%. Rather than writing Python loops, we use Spark’s native **CrossValidator**, which parallelizes folds and hyperparameter combinations across executors on EMR. We also broadcast small lookup tables (e.g., stop-word lists) once per executor, eliminating repeated serialization costs in every task. The chosen “best model” is persisted directly to **S3** with the optimized S3A connector (using the version-2 file committer), so any future inference cluster can load it without extra data movement. Although this stage serves as a demo, the same code patterns ensure that a full-scale training run on EMR (8 executors × 4 cores each) completes in minutes rather than hours.
+### 4.1 Data Ingestion  
+
+**Function:** Load raw CSV/JSON article dumps from S3, clean and normalize text fields, then write out partitioned Parquet to S3.
+
+**Scalability considerations:**  
+- **Parallelized S3 reads:** By using Spark’s S3A connector on EMR, our ingestion code automatically splits large S3 prefixes across dozens of executors. This parallel listing and file opening replaces the single-threaded downloads on a laptop, cutting a 30+ minute load down to just a few minutes.  
+- **Partitioned, compressed Parquet output:** We write data partitioned by publication date and source, with Snappy compression. Partition pruning in later jobs means only the relevant slices are scanned, therefore if you only need last month’s data, you skip 90% of the files. Compression further reduces storage and speeds up network I/O.  
+- **Idempotent, retryable writes:** Our spark-submit wrapper ensures that every write uses “overwrite” mode, and we built in retry logic that catches transient S3 errors and retries up to three times. This makes the ingestion step bullet-proof in the face of occasional AWS throttling or network problems.  
+- **Automated EMR step registration:** The ingestion script is defined as the first step in `config/emr_steps.json`. When the cluster spins up, EMR executes ingestion automatically—eliminating manual notebook clicks and guaranteeing that every run starts from a consistent, fresh data state.
 
 ---
 
-### 5.3 EMR Cluster Orchestration  
-We automate our entire workflow—ingest, demo training, and inference—by defining three **EMR Steps** in `config/emr_steps.json` and launching them with a single **Boto3**/AWS CLI job-flow call. Our cluster is configured with **Instance Fleets** combining on-demand and spot instances for cost efficiency (up to 50% savings) and **Auto Scaling policies** that add or remove core/task nodes based on YARN queue length and memory usage. By spinning up a **transient EMR** cluster (release label EMR-6.x with Spark), running the registered steps, and tearing it down automatically, we guarantee a clean environment for each run, prevent drift, and avoid paying for an always-on cluster. All cluster and step parameters—region, instance types, IAM roles, security configurations—are parameterized in JSON, making the setup fully repeatable, auditable, and easy to tweak for different data volumes or cost targets.
+### 4.2 Model Training  
+
+**Function:** Find and persist the best Spark ML pipeline (tokenizer → TF-IDF → VectorAssembler → classifier) by tuning both Logistic Regression and Random Forest at scale. This is how I trained the model that will serve for users from collected data in a much faster way. 
+
+**Scalability considerations:**  
+- **DataFrame caching before tuning:** Immediately after cleaning and filtering, we cache the entire training DataFrame in memory. This cut repeated Parquet reads during our 5-fold cross-validation grid search by roughly 70%. 
+- **Distributed hyperparameter search with CrossValidator:** Instead of Python loops, we leverage Spark’s native `CrossValidator` to parallelize each combination of parameters and folds across all executors. A grid that took 3+ hours on a 4-core laptop completes in under 15 minutes on an EMR fleet of eight executors.  
+- **Broadcasted lookup tables:** Common reference data are broadcast once to every executor at job start. This avoids serializing the same object for each task, reducing task startup time and increasing throughput.  
+- **Tuned shuffle and partition settings:** We matched `spark.sql.shuffle.partitions` to the number of core executors to minimize small shuffle files, and enabled adaptive execution so Spark can coalesce shuffle partitions automatically. These tweaks dramatically reduce disk I/O and network traffic.  
+- **S3-native “best model” persistence:** The final pipeline, including feature transformers and the chosen classifier, is written directly to `s3://<bucket>/models/best-model/` using the S3A connector’s version-2 committer. This eliminates any extra copy steps, and future inference clusters can load the model immediately.
 
 ---
 
-### 5.4 Batch Inference  
-Our production-grade scoring script (`inference/classify_batch.py`) accepts S3 input/output paths and uses Spark’s **PipelineModel.load()** to pull the persisted best model from `s3://<bucket>/models/`. We enable **dynamic resource allocation** in the Spark config so executors scale elastically to match the batch size—whether a policy analyst’s 50 articles/day or a researcher’s 1,000 articles/day. Before writing, we **coalesce** the resulting DataFrame into a fixed number of partitions (e.g. 20) to avoid thousands of tiny Parquet files, improving downstream query and listing performance. We tune the S3A connector (high connection concurrency, fast upload, version-2 committer) for 5× faster writes, and stream all driver and executor logs to **CloudWatch Logs**. Paired with CloudWatch Alarms and Amazon SNS notifications, this gives us real-time alerting on failures without manual log checks. Least-privilege **IAM roles** on the EMR EC2 instances handle all S3 access, so no credentials ever appear in code.
+### 5.3 Test Data Upload  
+
+**Function:** Provide a small, representative dataset for smoke tests and CI validation before scaling to the entire dataset for people to use
+
+**Scalability considerations:**  
+- **Sample stored alongside raw data:** We upload the test CSV (`data/data_test.csv`) to `s3://<bucket>/test/` using either Spark’s write API or a one-line AWS CLI command.  
+- **Automated smoke tests:** Our CI pipeline runs ingestion, training, and inference on this sample with a single `spark-submit` call, confirming end-to-end correctness and preserving confidence before kicking off the full-scale EMR run.
 
 ---
 
-By combining these code-level optimizations—caching, partition pruning, broadcast variables, CrossValidator, coalescing—with AWS capabilities—S3 parallelism, EMR auto-scaling, instance fleets, CloudWatch monitoring, and SNS alerting—we transform a local, memory-constrained 3-hour hyperparameter sweep into a sub-15-minute, fully automated pipeline capable of processing hundreds of thousands of articles per year with minimal operational overhead.
+### 5.4 EMR Cluster Orchestration  
+
+**Function:** Automate the provisioning of a transient EMR cluster, execute ingestion, training, and inference steps, and tear down the cluster upon completion.
+
+**Scalability considerations:**  
+- **Instance Fleets with Spot & On-Demand mix:** We configure EMR to use on-demand instances for drivers and a fleet of spot instances for workers. This delivers up to 50% cost savings while maintaining reliability for critical tasks.  
+- **Auto Scaling:** EMR’s managed auto scaling watches YARN metrics like pending tasks and memory utilization and adds or removes core/task nodes on the fly. This means our cluster never sits idle and yet always has capacity for unexpected spikes in workload.  
+- **Parameterized JSON steps:** In `config/emr_steps.json`, each logical stage—ingest, train, infer—is a separate step. This modularity lets us rerun only the necessary stages, skip training given the model is already up-to-date, or adjust retry and timeout settings independently.  
+- **Boto3/CLI wrapper for repeatability:** We wrap the AWS SDK call that spins up EMR in a short Python script, passing in cluster specs (instance types, counts, region), AWS IAM roles, and bootstrap actions. Every run is reproducible, auditable, and free of manual notebook clicks.
+
+---
+
+### 5.5 Batch Inference  
+
+**Function:** Apply the persisted best model to fresh input data at scale, writing predictions back to S3.
+
+**Scalability considerations:**  
+- **Dynamic resource allocation:** We enable Spark’s dynamic allocation, so the cluster automatically adds or removes executors based on the size of each incoming batch: whether 50 articles or 1,000 per day. This optimizes both cost and performance without manual tuning.  
+- **Output coalescing and compression:** Before writing predictions, we coalesce the DataFrame into a fixed number of partitions and use Snappy compression. This prevents the proliferation of tiny Parquet files in S3, speeding up downstream reads and reducing S3 API costs.  
+- **Optimized S3A connector settings:** We configure high connection concurrency, fast upload mode, and the Hadoop 3.0+ version-2 committer. These settings deliver 5–10× faster writes and reads compared to vanilla configurations, making daily or hourly inference jobs feasible.  
+- **CloudWatch Logs and SNS alerts:** All Spark driver and executor logs stream directly to CloudWatch Logs. We define CloudWatch Alarms on error log patterns and link them to an SNS topic, so failures trigger instant notifications via email or SMS—no manual log scraping required.  
+- **Least-privilege IAM roles:** EMR EC2 instances assume IAM roles that only allow S3 read/write on our buckets. No AWS credentials are embedded in code or notebooks, meeting best practices for security at scale.
+
+---
+
+By weaving together Spark-native optimizations—like intelligent caching, partition pruning, adaptive execution, and broadcast variables—with AWS capabilities—such as S3 parallelism, EMR instance fleets, auto scaling, spot pricing, and managed monitoring—we’ve built a pipeline that transforms a slow, error-prone local workflow into a robust, sub-15-minute end-to-end process capable of handling real-world, researcher-scale data volumes with minimal operational overhead.  

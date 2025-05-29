@@ -64,21 +64,41 @@ In this section, I walk through each stage of the pipeline, highlighting the sca
 
 This phase handles new data ingest for running the pre-trained model—designed for tens to hundreds of thousands of articles.
 
-* **Local CSV → Parquet conversion**
+* **Spark-based CSV → Parquet conversion & partitioning**
 
-  * Scripts leverage `pandas` to read raw CSVs and write to Parquet files.
-  * **Why Parquet?** Columnar storage with predicate pushdown and vectorized reads means Spark scans only required columns, reducing I/O and improving query latency by up to **5×** on wide tables.
+  * Using Spark’s DataFrame API instead of pandas:
+    ```python
+    df = spark.read.option("header", True) \
+                   .csv("s3://bucket/raw_csv/")
+
+    df.write.partitionBy("publish_date") \
+            .option("compression", "snappy") \
+            .mode("overwrite") \
+            .parquet("s3://bucket/parquet/partitioned/")
+    ```
+
+  * **Why Spark & partitioning?** Columnar storage with predicate pushdown and vectorized reads means Spark scans only required columns, reducing I/O and improving query latency by up to **5×** on wide tables.
+
   * **Scalability Benefit:** Parquet compression reduces data volume by 60–80%, cutting storage costs and network transfer times across massive datasets.
 
 * **Multithreaded S3 staging**
 
   * Using `boto3`’s `TransferConfig(max_concurrency=10, multipart_threshold=8MB, multipart_chunksize=8MB)` and `S3Transfer` for parallel uploads.
+
   * **Benefit:** Saturates network bandwidth—what once took minutes now completes in seconds, making cluster start-up latency negligible.
+
+* **Incremental manifest-driven ingest**
+
+  * Each run tracks new files using a manifest and compares with previous state to only process deltas.
+
+  * **Fault Tolerance:** Checkpointed manifests and idempotent writes avoid duplication and enable safe recovery after interruption.
 
 * **UUID-based path isolation**
 
   * Each run generates a unique S3 prefix via `uuid.uuid4()`, preventing collisions.
-  * **Fault Tolerance:** Isolated run directories simplify cleanup and rollback, avoiding contamination of production data.
+
+  * **Operational Scalability:** Isolated run directories simplify cleanup and rollback, avoiding contamination of production data.
+
 
 ---
 

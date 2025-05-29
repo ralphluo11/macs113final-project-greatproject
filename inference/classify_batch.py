@@ -25,17 +25,19 @@ def main(input_path: str, output_path: str):
     logging.info(f"Starting BatchClassify; reading from {input_path}")
     spark = (
         SparkSession.builder
-        .appName("BatchClassify")
-        .config("spark.hadoop.fs.s3a.connection.maximum", "100") 
-        .config("spark.hadoop.fs.s3a.fast.upload", "true")   
-        .config("spark.hadoop.fs.s3a.committer.name", "directory")
-        .config(
-           "spark.hadoop.mapreduce.outputcommitter.factory.scheme.s3a",
-           "org.apache.hadoop.fs.s3a.commit.S3ACommitterFactory"
-        )
-        .getOrCreate()
+            .appName("BatchClassify")
+            # AWS S3A connector optimizations 
+            .config("spark.hadoop.fs.s3a.fast.upload", "true")
+            .config("spark.hadoop.fs.s3a.connection.maximum", "100")
+            # Dynamic allocation 
+            .config("spark.dynamicAllocation.enabled", "true")
+            .config("spark.dynamicAllocation.minExecutors", "2")
+            .config("spark.dynamicAllocation.maxExecutors", "20")
+            # Adaptive execution shuffle tuning 
+            .config("spark.sql.adaptive.enabled", "true")
+            .config("spark.sql.shuffle.partitions", "200")
+            .getOrCreate()
     )
-
 
     # Read all parquet files under the input prefix
     df = spark.read.parquet(input_path).select("ID", "url", "content")
@@ -75,7 +77,15 @@ def main(input_path: str, output_path: str):
 
     # Write results out as Parquet
     logging.info(f"Writing results to {output_path}")
-    result.write.mode("overwrite").parquet(output_path)
+    # coalesce into a manageable number of files and compress for faster downstream reads
+    (
+        result 
+        .coalesce(20)
+        .write
+        .mode("overwrite")
+        .option("compression", "snappy")
+        .parquet(output_path)
+    )
 
     spark.stop()
     logging.info("BatchClassify complete")

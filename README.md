@@ -62,12 +62,6 @@ In this section, I walk through each stage of the pipeline, highlighting the sca
 ## 4.1 Data Upload & Parquet Staging
 
 This phase handles new data ingest for running the pre-trained model—designed for tens to hundreds of thousands of articles.
-
-* **Local CSV → Parquet conversion**
-
-  * Scripts leverage `pandas` to read raw CSVs and write to Parquet files.
-  * **Why Parquet?** Columnar storage with predicate pushdown and vectorized reads means Spark scans only required columns, reducing I/O and improving query latency by up to **5×** on wide tables.
-  * **Scalability Benefit:** Parquet compression reduces data volume by 60–80%, cutting storage costs and network transfer times across massive datasets.
  
 * **Spark-based CSV → Parquet conversion & partitioning**
 
@@ -83,6 +77,7 @@ This phase handles new data ingest for running the pre-trained model—designed 
     ```
 
   * **Why Spark & partitioning?** Conversion at cluster scale removes local bottlenecks. Partitioning by `publish_date` exploits partition pruning, so downstream queries scan only relevant date folders, reducing I/O by up to **90%** on time-bound workloads.
+  * **Why Parquet?** Columnar storage with predicate pushdown and vectorized reads means Spark scans only required columns, reducing I/O and improving query latency by up to **5×** on wide tables.
 
   * **Scalability Benefit:** Snappy-compressed Parquet with partition folders reduces data footprint by ~70% and accelerates reads on subsets.
 

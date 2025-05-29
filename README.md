@@ -58,6 +58,8 @@ In this section, I walk through each stage of the pipeline, highlighting the sca
 
 ## 4.1 Data Upload & Parquet Staging
 
+this is the place handle new data ingest to run the pre-trained model. It is designed for handling from tens to hundreds of thousands of articles.
+
 * **Local CSV → Parquet conversion**
 
   * Scripts leverage `pandas` to read raw CSVs and write them to Parquet files.
@@ -76,7 +78,9 @@ In this section, I walk through each stage of the pipeline, highlighting the sca
 
 ---
 
-## 4.2 Demonstration Model Training
+## 4.2 Model Training Process
+
+Here shows how i trained the model on existing huge dataset benefited from scalable computing methods.
 
 * **Spark ML Pipeline**
 

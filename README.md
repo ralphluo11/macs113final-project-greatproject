@@ -63,23 +63,18 @@ In this section, I walk through each stage of the pipeline, highlighting the sca
 
 This phase handles new data ingest for running the pre-trained model—designed for tens to hundreds of thousands of articles.
  
-* **Spark-based CSV → Parquet conversion & partitioning**
+* **Spark-based CSV → Parquet conversion**
 
   * Using Spark’s DataFrame API instead of pandas:
     ```python
     df = spark.read.option("header", True) \
                    .csv("s3://bucket/raw_csv/")
 
-    df.write.partitionBy("publish_date") \
-            .option("compression", "snappy") \
-            .mode("overwrite") \
-            .parquet("s3://bucket/parquet/partitioned/")
     ```
+  * **Why Spark?** Spark’s distributed DataFrame API enables scalable CSV ingestion and Parquet writing. Compared to pandas, Spark avoids local memory bottlenecks by parallelizing I/O and computation across nodes—crucial when processing tens of thousands of articles.
+  * **Why Parquet?** Writing to Parquet format with columnar storage allows efficient predicate pushdown and vectorized reads, dramatically reducing I/O. Even without partitioning, Parquet can improve query performance and reduce data footprint by 60–70% compared to raw CSV.
 
-  * **Why Spark & partitioning?** Conversion at cluster scale removes local bottlenecks. Partitioning by `publish_date` exploits partition pruning, so downstream queries scan only relevant date folders, reducing I/O by up to **90%** on time-bound workloads.
-  * **Why Parquet?** Columnar storage with predicate pushdown and vectorized reads means Spark scans only required columns, reducing I/O and improving query latency by up to **5×** on wide tables.
-
-  * **Scalability Benefit:** Snappy-compressed Parquet with partition folders reduces data footprint by ~70% and accelerates reads on subsets.
+  * **Scalability Benefit:** Writing compressed Parquet with Spark distributes the workload across the cluster and reduces the final data footprint by ~60–70%, enabling faster downstream reads and efficient storage without the memory limits of pandas or CSV.
 
 * **UUID-based path isolation**
 

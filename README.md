@@ -167,6 +167,6 @@ This section details how the model is trained on large datasets using scalable c
 
 ---
 
-**By combining** columnar storage, parallelized I/O, in-memory caching, distributed tuning, fleet-based provisioning, and adaptive Spark optimizations, **this pipeline** achieves both horizontal and vertical scalability—ensuring reliable, cost-effective processing as data volumes and complexity grow.
+This pipeline leverages Apache Spark on AWS EMR to handle scalable data ingestion, model training, and batch inference across tens to hundreds of thousands of articles. Distributed data processing, Parquet storage, and in-memory caching accelerate I/O-bound tasks, while EMR’s dynamic scaling, instance fleet configuration, and adaptive Spark tuning ensure cost-efficiency and elasticity. From UUID-based path isolation to ensemble UDFs and S3-native model persistence, each component is optimized for fault tolerance, throughput, and minimal manual intervention.
 
 ```

@@ -101,10 +101,9 @@ This section details how the model is trained on large datasets using scalable c
   * Utilize `CrossValidator` + `ParamGridBuilder` to parallelize parameter-grid evaluations across executors and folds.
   * **Scalability Benefit:** A grid search that would take 8 hours on a single machine completes in under 15 minutes on an 8-node cluster, enabling rapid iteration.
 
-* **Reproducibility & monitoring**
+* **Reproducibility**
 
   * Seed with `random.seed(42)` and `numpy.random.seed(42)` for deterministic splits and results.
-  * Leverage `logging` for real-time progress, warnings, and alerts on long-running jobs.
 
 * **S3-native model persistence**
 

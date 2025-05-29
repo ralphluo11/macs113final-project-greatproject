@@ -50,80 +50,112 @@ final-project/
     └── data_test.csv
 ```
 
-4. Pipeline & Scalable Methods
+# Pipeline & Scalable Methods
 
 In this section, I walk through each stage of the pipeline, highlighting the scalable computing techniques that deliver a high-throughput, fault-tolerant Big Data workflow on AWS EMR. By layering parallelism, data locality, and adaptive resource management, this architecture can seamlessly scale from tens to hundreds of thousands of articles with minimal human intervention.
 
-⸻
+---
 
-4.1 Data Upload & Parquet Staging
-	•	Local CSV → Parquet conversion
-	•	Scripts leverage pandas to read raw CSVs and write them to Parquet files.
-	•	Why Parquet? Columnar storage supports predicate pushdown and vectorized reads, so Spark scans only required columns, dramatically reducing I/O and improving query latency by up to 5× on wide tables.
-	•	Scalability Benefit: Reducing data volume by 60–80% via Parquet compression lowers both storage costs and network transfer times across massive datasets.
-	•	Multithreaded S3 staging
-	•	Using boto3’s TransferConfig(max_concurrency=10, multipart_threshold=8 MB, multipart_chunksize=8 MB) and S3Transfer for parallel uploads.
-	•	Benefit: Parallel threads saturate network bandwidth—what once took minutes now completes in seconds, ensuring cluster start-up latency is negligible.
-	•	UUID-based path isolation
-	•	Each run generates a unique S3 prefix via uuid.uuid4(), preventing collisions.
-	•	Fault Tolerance: Isolated run directories simplify cleanup and rollback, isolating partial uploads from production data.
+## 4.1 Data Upload & Parquet Staging
 
-⸻
+* **Local CSV → Parquet conversion**
 
-4.2 Demonstration Model Training
-	•	Spark ML Pipeline
-	•	Chaining Tokenizer → HashingTF → IDF → VectorAssembler → Classifier into one Pipeline enables Spark to optimize across transformer and estimator stages, reducing shuffle operations and minimizing task overhead.
-	•	In-memory caching & persistence
-	•	Invoking .cache() (and .persist()) stores pre-processed partitions in executor memory (with disk spill) so that 5-fold cross-validation reuses them rather than re-reading S3—cutting I/O by ~80%.
-	•	Distributed hyperparameter search
-	•	Using CrossValidator + ParamGridBuilder parallelizes grid evaluations across executors and data folds.
-	•	Scalability Benefit: A search that would take 8 hours on a single machine completes in under 15 minutes on an 8-node cluster, allowing rapid experimentation at scale.
-	•	Reproducibility & monitoring
-	•	Seeding with random.seed(42) and numpy.random.seed(42) ensures consistent results across runs.
-	•	Logging via the logging module provides real-time visibility into long-running jobs, triggering alerts on failures.
-	•	S3-native model persistence
-	•	Saving the best PipelineModel directly to S3 using the S3A v2 committer.
-	•	Benefit: Eliminates extra copy steps—models are immediately available for downstream batch or streaming inference pipelines.
+  * Scripts leverage `pandas` to read raw CSVs and write them to Parquet files.
+  * **Why Parquet?** Columnar storage supports predicate pushdown and vectorized reads, so Spark scans only required columns, dramatically reducing I/O and improving query latency by up to **5×** on wide tables.
+  * **Scalability Benefit:** Reducing data volume by 60–80% via Parquet compression lowers both storage costs and network transfer times across massive datasets.
 
-⸻
+* **Multithreaded S3 staging**
 
-4.3 EMR Cluster Configuration
-	•	Instance Fleets (On-Demand + Spot)
-	•	A master fleet on On-Demand and a core fleet mixing On-Demand and Spot nodes.
-	•	Cost Efficiency: Spot instances can reduce worker node costs by up to 70%, while On-Demand master nodes guarantee cluster stability.
-	•	Managed scaling policies
-	•	EMR’s managed scaling automatically adjusts core fleet size (4–16 nodes) based on YARN metrics.
-	•	Elasticity Benefit: The cluster dynamically adapts to workload spikes—scaling out for bulk ingest and scaling in during idle periods to save costs.
-	•	Cluster-wide Spark tuning
+  * Using `boto3`’s `TransferConfig(max_concurrency=10, multipart_threshold=8MB, multipart_chunksize=8MB)` and `S3Transfer` for parallel uploads.
+  * **Benefit:** Parallel threads saturate network bandwidth—what once took minutes now completes in seconds, ensuring cluster start-up latency is negligible.
 
-{
-  "spark.hadoop.fs.s3a.fast.upload": "true",
-  "spark.hadoop.fs.s3a.connection.maximum": "100",
-  "spark.dynamicAllocation.enabled": "true",
-  "spark.sql.adaptive.enabled": "true"
-}
+* **UUID-based path isolation**
 
-	•	Performance Benefit: Fast S3A uploads, dynamic executor allocation, and adaptive query planning guarantee optimal resource utilization across diverse workloads.
+  * Each run generates a unique S3 prefix via `uuid.uuid4()`, preventing collisions.
+  * **Fault Tolerance:** Isolated run directories simplify cleanup and rollback, isolating partial uploads from production data.
 
-	•	Automated EMR steps
-	•	config/emr_steps.json defines logical steps (IngestData, BiasClassification) executed sequentially by command-runner.jar.
-	•	Operational Scalability: Automated steps remove manual handoffs—new pipeline versions deploy via updated JSON, enabling CI/CD of data workflows.
+---
 
-⸻
+## 4.2 Demonstration Model Training
 
-4.4 Batch Inference
-	•	Dynamic executor allocation
-	•	spark.dynamicAllocation.minExecutors=2 and maxExecutors=20 allow Spark to elastically scale executors based on real-time backlog.
-	•	Benefit: Prevents over-provisioning during light loads and under-provisioning during peaks, optimizing cost-per-inference.
-	•	Adaptive execution & shuffle tuning
-	•	spark.sql.adaptive.enabled=true and spark.sql.shuffle.partitions=200 merge small partitions at runtime, reducing shuffle I/O and speeding up large joins.
-	•	Custom ensemble UDFs & vector operations
-	•	A custom avg_udf combines logistic and random forest probability vectors in-cluster, enabling lightweight ensemble predictions without external orchestration.
-	•	Scalability Benefit: Inline UDF ensembles scale with the cluster, avoiding serialization overhead of separate model endpoints.
-	•	Coalesced, Snappy-compressed outputs
-	•	After prediction, results .coalesce(20) and write with .option("compression", "snappy").
-	•	Benefit: Produces a fixed number of smaller, compressed files for faster downstream queries, minimizing S3 request costs and accelerating ad-hoc analysis.
+* **Spark ML Pipeline**
 
-⸻
+  * Chaining `Tokenizer → HashingTF → IDF → VectorAssembler → Classifier` into one `Pipeline` enables Spark to optimize across transformer and estimator stages, reducing shuffle operations and minimizing task overhead.
 
-By combining columnar storage, parallelized I/O, in-memory caching, distributed tuning, fleet-based provisioning, and adaptive Spark optimizations, this pipeline achieves both horizontal and vertical scalability—ensuring reliable, cost-effective processing as data volumes and complexity grow.
+* **In-memory caching & persistence**
+
+  * Invoking `.cache()` (and `.persist()`) stores pre-processed partitions in executor memory (with disk spill) so that 5-fold cross-validation reuses them rather than re-reading S3—cutting I/O by \~80%.
+
+* **Distributed hyperparameter search**
+
+  * Using `CrossValidator` + `ParamGridBuilder` parallelizes grid evaluations across executors and data folds.
+  * **Scalability Benefit:** A search that would take 8 hours on a single machine completes in under 15 minutes on an 8-node cluster, allowing rapid experimentation at scale.
+
+* **Reproducibility & monitoring**
+
+  * Seeding with `random.seed(42)` and `numpy.random.seed(42)` ensures consistent results across runs.
+  * Logging via the `logging` module provides real-time visibility into long-running jobs, triggering alerts on failures.
+
+* **S3-native model persistence**
+
+  * Saving the best `PipelineModel` directly to S3 using the S3A v2 committer.
+  * **Benefit:** Eliminates extra copy steps—models are immediately available for downstream batch or streaming inference pipelines.
+
+---
+
+## 4.3 EMR Cluster Configuration
+
+* **Instance Fleets (On-Demand + Spot)**
+
+  * A master fleet on On-Demand and a core fleet mixing On-Demand and Spot nodes.
+  * **Cost Efficiency:** Spot instances can reduce worker node costs by up to **70%**, while On-Demand master nodes guarantee cluster stability.
+
+* **Managed scaling policies**
+
+  * EMR’s managed scaling automatically adjusts core fleet size (4–16 nodes) based on YARN metrics.
+  * **Elasticity Benefit:** The cluster dynamically adapts to workload spikes—scaling out for bulk ingest and scaling in during idle periods to save costs.
+
+* **Cluster-wide Spark tuning**
+
+  ```json
+  {
+    "spark.hadoop.fs.s3a.fast.upload": "true",
+    "spark.hadoop.fs.s3a.connection.maximum": "100",
+    "spark.dynamicAllocation.enabled": "true",
+    "spark.sql.adaptive.enabled": "true"
+  }
+  ```
+
+  * **Performance Benefit:** Fast S3A uploads, dynamic executor allocation, and adaptive query planning guarantee optimal resource utilization across diverse workloads.
+
+* **Automated EMR steps**
+
+  * `config/emr_steps.json` defines logical steps (`IngestData`, `BiasClassification`) executed sequentially by `command-runner.jar`.
+  * **Operational Scalability:** Automated steps remove manual handoffs—new pipeline versions deploy via updated JSON, enabling CI/CD of data workflows.
+
+---
+
+## 4.4 Batch Inference
+
+* **Dynamic executor allocation**
+
+  * `spark.dynamicAllocation.minExecutors=2` and `maxExecutors=20` allow Spark to elastically scale executors based on real-time backlog.
+  * **Benefit:** Prevents over-provisioning during light loads and under-provisioning during peaks, optimizing cost-per-inference.
+
+* **Adaptive execution & shuffle tuning**
+
+  * `spark.sql.adaptive.enabled=true` and `spark.sql.shuffle.partitions=200` merge small partitions at runtime, reducing shuffle I/O and speeding up large joins.
+
+* **Custom ensemble UDFs & vector operations**
+
+  * A custom `avg_udf` combines logistic and random forest probability vectors in-cluster, enabling lightweight ensemble predictions without external orchestration.
+  * **Scalability Benefit:** Inline UDF ensembles scale with the cluster, avoiding serialization overhead of separate model endpoints.
+
+* **Coalesced, Snappy-compressed outputs**
+
+  * After prediction, results `.coalesce(20)` and write with `.option("compression", "snappy")`.
+  * **Benefit:** Produces a fixed number of smaller, compressed files for faster downstream queries, minimizing S3 request costs and accelerating ad-hoc analysis.
+
+---
+
+**By combining** columnar storage, parallelized I/O, in-memory caching, distributed tuning, fleet-based provisioning, and adaptive Spark optimizations, **this pipeline** achieves both horizontal and vertical scalability—ensuring reliable, cost-effective processing as data volumes and complexity grow.

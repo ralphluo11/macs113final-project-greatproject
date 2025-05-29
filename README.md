@@ -63,6 +63,12 @@ In this section, I walk through each stage of the pipeline, highlighting the sca
 
 This phase handles new data ingest for running the pre-trained model—designed for tens to hundreds of thousands of articles.
 
+* **Local CSV → Parquet conversion**
+
+  * Scripts leverage `pandas` to read raw CSVs and write to Parquet files.
+  * **Why Parquet?** Columnar storage with predicate pushdown and vectorized reads means Spark scans only required columns, reducing I/O and improving query latency by up to **5×** on wide tables.
+  * **Scalability Benefit:** Parquet compression reduces data volume by 60–80%, cutting storage costs and network transfer times across massive datasets.
+ 
 * **Spark-based CSV → Parquet conversion & partitioning**
 
   * Using Spark’s DataFrame API instead of pandas:
@@ -80,23 +86,9 @@ This phase handles new data ingest for running the pre-trained model—designed 
 
   * **Scalability Benefit:** Snappy-compressed Parquet with partition folders reduces data footprint by ~70% and accelerates reads on subsets.
 
-* **Bulk S3 transfers with S3DistCp & AWS CLI**
-
-  * For large directory moves, leverage EMR’s `s3-dist-cp` or AWS CLI’s `aws s3 cp --recursive --jobs 32`.
-
-  * **Benefit:** Multi-threaded, multipart transfers of thousands of files complete in minutes rather than hours, keeping ingestion latency low.
-
-* **Incremental manifest-driven ingest**
-
-  * Maintain a manifest file listing new CSV blobs in each run.  
-    Use a lightweight Python script to compare against the previous manifest and only process deltas.
-
-  * **Fault Tolerance:** Checkpointed manifests and idempotent writes avoid reprocessing and ensure recoverability on failures.
-
-* **UUID-based path isolation & cleanup**
+* **UUID-based path isolation**
 
   * Each run generates a unique S3 prefix via `uuid.uuid4()`, preventing collisions.  
-    After successful completion, use an AWS Lambda function to clean up prefixes older than 7 days.
 
   * **Operational Scalability:** Automated cleanup and path isolation reduce manual maintenance and storage costs.
 

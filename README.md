@@ -54,12 +54,11 @@ final-project/
 
 ---
 
-# Pipeline & Scalable Methods
+# 4. Pipeline & Scalable Methods
 
 In this section, I walk through each stage of the pipeline, highlighting the scalable computing techniques that deliver a high-throughput, fault-tolerant Big Data workflow on AWS EMR. By layering parallelism, data locality, and adaptive resource management, this architecture can seamlessly scale from tens to hundreds of thousands of articles with minimal human intervention.
 
 ---
-
 ## 4.1 Data Upload & Parquet Staging
 
 This phase handles new data ingest for running the pre-trained model—designed for tens to hundreds of thousands of articles.
@@ -77,28 +76,29 @@ This phase handles new data ingest for running the pre-trained model—designed 
             .parquet("s3://bucket/parquet/partitioned/")
     ```
 
-  * **Why Spark & partitioning?** Columnar storage with predicate pushdown and vectorized reads means Spark scans only required columns, reducing I/O and improving query latency by up to **5×** on wide tables.
+  * **Why Spark & partitioning?** Conversion at cluster scale removes local bottlenecks. Partitioning by `publish_date` exploits partition pruning, so downstream queries scan only relevant date folders, reducing I/O by up to **90%** on time-bound workloads.
 
-  * **Scalability Benefit:** Parquet compression reduces data volume by 60–80%, cutting storage costs and network transfer times across massive datasets.
+  * **Scalability Benefit:** Snappy-compressed Parquet with partition folders reduces data footprint by ~70% and accelerates reads on subsets.
 
-* **Multithreaded S3 staging**
+* **Bulk S3 transfers with S3DistCp & AWS CLI**
 
-  * Using `boto3`’s `TransferConfig(max_concurrency=10, multipart_threshold=8MB, multipart_chunksize=8MB)` and `S3Transfer` for parallel uploads.
+  * For large directory moves, leverage EMR’s `s3-dist-cp` or AWS CLI’s `aws s3 cp --recursive --jobs 32`.
 
-  * **Benefit:** Saturates network bandwidth—what once took minutes now completes in seconds, making cluster start-up latency negligible.
+  * **Benefit:** Multi-threaded, multipart transfers of thousands of files complete in minutes rather than hours, keeping ingestion latency low.
 
 * **Incremental manifest-driven ingest**
 
-  * Each run tracks new files using a manifest and compares with previous state to only process deltas.
+  * Maintain a manifest file listing new CSV blobs in each run.  
+    Use a lightweight Python script to compare against the previous manifest and only process deltas.
 
-  * **Fault Tolerance:** Checkpointed manifests and idempotent writes avoid duplication and enable safe recovery after interruption.
+  * **Fault Tolerance:** Checkpointed manifests and idempotent writes avoid reprocessing and ensure recoverability on failures.
 
-* **UUID-based path isolation**
+* **UUID-based path isolation & cleanup**
 
-  * Each run generates a unique S3 prefix via `uuid.uuid4()`, preventing collisions.
+  * Each run generates a unique S3 prefix via `uuid.uuid4()`, preventing collisions.  
+    After successful completion, use an AWS Lambda function to clean up prefixes older than 7 days.
 
-  * **Operational Scalability:** Isolated run directories simplify cleanup and rollback, avoiding contamination of production data.
-
+  * **Operational Scalability:** Automated cleanup and path isolation reduce manual maintenance and storage costs.
 
 ---
 

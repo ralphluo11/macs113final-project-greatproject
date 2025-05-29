@@ -169,4 +169,3 @@ This section details how the model is trained on large datasets using scalable c
 **By combining** columnar storage, parallelized I/O, in-memory caching, distributed tuning, fleet-based provisioning, and adaptive Spark optimizations, **this pipeline** achieves both horizontal and vertical scalability—ensuring reliable, cost-effective processing as data volumes and complexity grow.
 
 ```
-```
